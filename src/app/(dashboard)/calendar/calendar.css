@@ -1,0 +1,47 @@
+.fc {
+  --fc-border-color: hsl(var(--border));
+  --fc-button-bg-color: hsl(var(--primary));
+  --fc-button-border-color: hsl(var(--primary));
+  --fc-button-hover-bg-color: hsl(var(--primary) / 0.9);
+  --fc-button-hover-border-color: hsl(var(--primary) / 0.9);
+  --fc-button-active-bg-color: hsl(var(--primary));
+  --fc-button-active-border-color: hsl(var(--primary));
+  --fc-event-bg-color: hsl(var(--primary));
+  --fc-event-border-color: hsl(var(--primary));
+  --fc-page-bg-color: transparent;
+  --fc-list-event-hover-bg-color: hsl(var(--muted));
+  font-family: inherit;
+}
+
+.fc .fc-toolbar-title {
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+
+.fc .fc-button {
+  padding: 0.5rem 1rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  border-radius: var(--radius);
+  text-transform: capitalize;
+}
+
+.fc .fc-button-primary:not(:disabled).fc-button-active, 
+.fc .fc-button-primary:not(:disabled):active {
+  background-color: hsl(var(--primary));
+  border-color: hsl(var(--primary));
+}
+
+.fc-theme-standard td, .fc-theme-standard th {
+  border: 1px solid hsl(var(--border));
+}
+
+.fc-daygrid-event {
+  border-radius: 4px;
+  padding: 2px 4px;
+  font-size: 0.75rem;
+}
+
+.calendar-container {
+  background: transparent;
+}
