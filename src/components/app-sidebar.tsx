@@ -12,6 +12,7 @@ import {
   Building2,
   ChevronRight,
   Menu,
+  Users,
 } from "lucide-react"
 
 import {
@@ -48,6 +49,24 @@ const items = [
     url: "/bookings",
     icon: Calendar,
     color: "text-amber-500",
+  },
+  {
+    title: "Dormitories",
+    url: "/dormitories",
+    icon: Building2,
+    color: "text-violet-500",
+  },
+  {
+    title: "Dorm Calendar",
+    url: "/dormitory-calendar",
+    icon: Calendar,
+    color: "text-cyan-500",
+  },
+  {
+    title: "Attendance",
+    url: "/attendance",
+    icon: Users,
+    color: "text-pink-500",
   },
   {
     title: "Calendar",

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import * as z from "zod"
@@ -51,9 +51,10 @@ interface HallBookingDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   onSuccess: () => void
+  editingBooking?: any
 }
 
-export function HallBookingDialog({ open, onOpenChange, onSuccess }: HallBookingDialogProps) {
+export function HallBookingDialog({ open, onOpenChange, onSuccess, editingBooking }: HallBookingDialogProps) {
   const supabase = createClient()
   const [loading, setLoading] = useState(false)
 
@@ -69,19 +70,50 @@ export function HallBookingDialog({ open, onOpenChange, onSuccess }: HallBooking
     },
   })
 
+  useEffect(() => {
+    if (open) {
+      if (editingBooking) {
+        const parsedDate = editingBooking.event_date ? new Date(editingBooking.event_date + "T00:00:00") : new Date()
+        form.reset({
+          customer_name: editingBooking.customer_name || "",
+          phone_number: editingBooking.phone_number || "",
+          event_date: parsedDate,
+          start_time: editingBooking.start_time?.slice(0, 5) || "09:00",
+          end_time: editingBooking.end_time?.slice(0, 5) || "17:00",
+          purpose: editingBooking.purpose || "",
+        })
+      } else {
+        form.reset({
+          customer_name: "",
+          phone_number: "",
+          event_date: new Date(),
+          start_time: "09:00",
+          end_time: "17:00",
+          purpose: "",
+        })
+      }
+    }
+  }, [open, editingBooking, form])
+
   async function onSubmit(values: z.infer<typeof formSchema>) {
     setLoading(true)
     try {
       const dateStr = format(values.event_date, "yyyy-MM-dd")
 
       // Overlap check
-      const { data: overlaps, error: overlapError } = await supabase
+      let overlapQuery = supabase
         .from("hall_bookings")
         .select("*")
         .eq("event_date", dateStr)
         .eq("status", "confirmed")
         .filter("start_time", "lt", values.end_time)
         .filter("end_time", "gt", values.start_time)
+
+      if (editingBooking) {
+        overlapQuery = overlapQuery.neq("id", editingBooking.id)
+      }
+
+      const { data: overlaps, error: overlapError } = await overlapQuery
 
       if (overlapError) throw overlapError
 
@@ -91,26 +123,43 @@ export function HallBookingDialog({ open, onOpenChange, onSuccess }: HallBooking
         return
       }
 
-      const { error } = await supabase
-        .from("hall_bookings")
-        .insert([{
-          customer_name: values.customer_name,
-          phone_number: values.phone_number,
-          event_date: dateStr,
-          start_time: values.start_time,
-          end_time: values.end_time,
-          purpose: values.purpose,
-          status: "confirmed"
-        }])
+      if (editingBooking) {
+        const { error } = await supabase
+          .from("hall_bookings")
+          .update({
+            customer_name: values.customer_name,
+            phone_number: values.phone_number,
+            event_date: dateStr,
+            start_time: values.start_time,
+            end_time: values.end_time,
+            purpose: values.purpose,
+          })
+          .eq("id", editingBooking.id)
 
-      if (error) throw error
+        if (error) throw error
+        toast.success("Hall booking updated successfully")
+      } else {
+        const { error } = await supabase
+          .from("hall_bookings")
+          .insert([{
+            customer_name: values.customer_name,
+            phone_number: values.phone_number,
+            event_date: dateStr,
+            start_time: values.start_time,
+            end_time: values.end_time,
+            purpose: values.purpose,
+            status: "confirmed"
+          }])
 
-      toast.success("Hall booking confirmed")
+        if (error) throw error
+        toast.success("Hall booking confirmed")
+      }
+
       form.reset()
       onSuccess()
       onOpenChange(false)
     } catch (error: any) {
-      toast.error("Error creating booking: " + error.message)
+      toast.error("Error saving booking: " + error.message)
     } finally {
       setLoading(false)
     }
@@ -120,7 +169,7 @@ export function HallBookingDialog({ open, onOpenChange, onSuccess }: HallBooking
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[425px]">
         <DialogHeader>
-          <DialogTitle>New Hall Booking</DialogTitle>
+          <DialogTitle>{editingBooking ? "Edit Hall Booking" : "New Hall Booking"}</DialogTitle>
         </DialogHeader>
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 pt-4">
@@ -236,7 +285,7 @@ export function HallBookingDialog({ open, onOpenChange, onSuccess }: HallBooking
             <DialogFooter className="pt-4">
               <Button type="submit" className="w-full" disabled={loading}>
                 {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                Confirm Booking
+                {editingBooking ? "Save Changes" : "Confirm Booking"}
               </Button>
             </DialogFooter>
           </form>

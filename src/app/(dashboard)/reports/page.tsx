@@ -3,16 +3,22 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { FileText, Download, PieChart, Calendar, TrendingUp, Users, Bed, ArrowRight, Share2, Printer } from "lucide-react"
-import { generateRoomReport, generateHallReport } from "@/lib/reports"
+import { FileText, Download, PieChart, Calendar, TrendingUp, Users, Bed, ArrowRight, Share2, Printer, Building2, ClipboardList } from "lucide-react"
+import { generateRoomReport, generateHallReport, generateDormReport, generateAttendanceReport } from "@/lib/reports"
 import { toast } from "sonner"
 import { motion } from "framer-motion"
 import { cn } from "@/lib/utils"
 
 export default function ReportsPage() {
-  const handleExport = async (type: 'room' | 'hall') => {
+  const handleExport = async (type: 'room' | 'hall' | 'dorm' | 'attendance') => {
+    let promise;
+    if (type === 'room') promise = generateRoomReport();
+    else if (type === 'hall') promise = generateHallReport();
+    else if (type === 'dorm') promise = generateDormReport();
+    else promise = generateAttendanceReport('monthly');
+
     toast.promise(
-      type === 'room' ? generateRoomReport() : generateHallReport(),
+      promise,
       {
         loading: `Generating ${type} report...`,
         success: `${type.charAt(0).toUpperCase() + type.slice(1)} report exported successfully!`,
@@ -37,7 +43,21 @@ export default function ReportsPage() {
       type: "hall" as const,
     },
     {
-      title: "Occupancy Summary",
+      title: "Dormitory Bed Bookings",
+      description: "Detailed list of all dormitory bed space bookings and current occupancy.",
+      icon: Building2,
+      color: "bg-violet-500",
+      type: "dorm" as const,
+    },
+    {
+      title: "Staff Attendance Summary",
+      description: "Roster performance review, presence rate, and monthly tracked days.",
+      icon: ClipboardList,
+      color: "bg-pink-500",
+      type: "attendance" as const,
+    },
+    {
+      title: "Property Occupancy Summary",
       description: "Summary of room availability, total stays, and property utilization.",
       icon: PieChart,
       color: "bg-emerald-500",

@@ -40,7 +40,7 @@ export default function HistoryPage() {
         .eq("status", "completed")
 
       const combined = [
-        ...(rooms || []).map(b => ({
+        ...(rooms || []).map((b: any) => ({
           id: b.id,
           type: "Room",
           customer: b.customer_name,
@@ -48,7 +48,7 @@ export default function HistoryPage() {
           date: b.check_in_date,
           completedAt: b.check_out_date,
         })),
-        ...(halls || []).map(b => ({
+        ...(halls || []).map((b: any) => ({
           id: b.id,
           type: "Hall",
           customer: b.customer_name,

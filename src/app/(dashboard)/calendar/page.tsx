@@ -34,7 +34,7 @@ export default function CalendarPage() {
         .select("*")
         .neq("status", "cancelled")
 
-      const roomEvents = (roomBookings || []).map(b => ({
+      const roomEvents = (roomBookings || []).map((b: any) => ({
         id: b.id,
         title: `Room ${b.rooms?.room_number}: ${b.customer_name}`,
         start: b.check_in_date,
@@ -43,7 +43,7 @@ export default function CalendarPage() {
         extendedProps: { type: "room" }
       }))
 
-      const hallEvents = (hallBookings || []).map(b => ({
+      const hallEvents = (hallBookings || []).map((b: any) => ({
         id: b.id,
         title: `Hall: ${b.customer_name} (${b.purpose || "Event"})`,
         start: `${b.event_date}T${b.start_time}`,

@@ -18,10 +18,36 @@ export default function BookingsPage() {
   const [activeTab, setActiveTab] = useState("rooms")
   const [isRoomDialogOpen, setIsRoomDialogOpen] = useState(false)
   const [isHallDialogOpen, setIsHallDialogOpen] = useState(false)
+  const [editingRoomBooking, setEditingRoomBooking] = useState<any | null>(null)
+  const [editingHallBooking, setEditingHallBooking] = useState<any | null>(null)
   const [searchQuery, setSearchQuery] = useState("")
   const [refreshTrigger, setRefreshTrigger] = useState(0)
 
   const handleRefresh = () => setRefreshTrigger(prev => prev + 1)
+
+  const handleRoomDialogClose = (open: boolean) => {
+    setIsRoomDialogOpen(open)
+    if (!open) {
+      setEditingRoomBooking(null)
+    }
+  }
+
+  const handleHallDialogClose = (open: boolean) => {
+    setIsHallDialogOpen(open)
+    if (!open) {
+      setEditingHallBooking(null)
+    }
+  }
+
+  const handleEditRoomBooking = (booking: any) => {
+    setEditingRoomBooking(booking)
+    setIsRoomDialogOpen(true)
+  }
+
+  const handleEditHallBooking = (booking: any) => {
+    setEditingHallBooking(booking)
+    setIsHallDialogOpen(true)
+  }
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
@@ -36,7 +62,15 @@ export default function BookingsPage() {
           <Button variant="outline" onClick={() => activeTab === "rooms" ? generateRoomReport() : generateHallReport()}>
             <FileText className="mr-2 h-4 w-4" /> Export PDF
           </Button>
-          <Button onClick={() => activeTab === "rooms" ? setIsRoomDialogOpen(true) : setIsHallDialogOpen(true)}>
+          <Button onClick={() => {
+            if (activeTab === "rooms") {
+              setEditingRoomBooking(null)
+              setIsRoomDialogOpen(true)
+            } else {
+              setEditingHallBooking(null)
+              setIsHallDialogOpen(true)
+            }
+          }}>
             <Plus className="mr-2 h-4 w-4" /> New {activeTab === "rooms" ? "Room" : "Hall"} Booking
           </Button>
         </div>
@@ -62,23 +96,35 @@ export default function BookingsPage() {
         </div>
 
         <TabsContent value="rooms" className="space-y-4">
-          <RoomBookingList searchQuery={searchQuery} refreshTrigger={refreshTrigger} onRefresh={handleRefresh} />
+          <RoomBookingList 
+            searchQuery={searchQuery} 
+            refreshTrigger={refreshTrigger} 
+            onRefresh={handleRefresh} 
+            onEdit={handleEditRoomBooking}
+          />
         </TabsContent>
         
         <TabsContent value="halls" className="space-y-4">
-          <HallBookingList searchQuery={searchQuery} refreshTrigger={refreshTrigger} onRefresh={handleRefresh} />
+          <HallBookingList 
+            searchQuery={searchQuery} 
+            refreshTrigger={refreshTrigger} 
+            onRefresh={handleRefresh} 
+            onEdit={handleEditHallBooking}
+          />
         </TabsContent>
       </Tabs>
 
       <RoomBookingDialog 
         open={isRoomDialogOpen} 
-        onOpenChange={setIsRoomDialogOpen} 
+        onOpenChange={handleRoomDialogClose} 
         onSuccess={handleRefresh} 
+        editingBooking={editingRoomBooking}
       />
       <HallBookingDialog 
         open={isHallDialogOpen} 
-        onOpenChange={setIsHallDialogOpen} 
+        onOpenChange={handleHallDialogClose} 
         onSuccess={handleRefresh} 
+        editingBooking={editingHallBooking}
       />
     </div>
   )
