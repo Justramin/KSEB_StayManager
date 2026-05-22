@@ -162,23 +162,31 @@ export async function generateAttendanceReport(
   const tableData = (staffList || []).map((s: any) => {
     const records = (attendanceList || []).filter((a: any) => a.staff_id === s.id)
     const total = records.length
-    const present = records.filter((a: any) => a.status === "present").length
-    const absent = records.filter((a: any) => a.status === "absent").length
-    const percentage = total > 0 ? Math.round((present / total) * 100) : 0
+    const present = records.filter((a: any) => ["Full Day", "Half Day", "active_shift", "present", "half_day", "late"].includes(a.status)).length
+    const absent = records.filter((a: any) => ["Absent", "absent"].includes(a.status)).length
+    const leaves = records.filter((a: any) => ["Leave", "on_leave", "holiday", "weekend"].includes(a.status)).length
+    const totalHours = records.reduce((acc, a) => acc + Number(a.working_hours || 0), 0)
+    const totalOvertime = records.reduce((acc, a) => acc + Number(a.overtime_hours || 0), 0)
+    
+    const denominator = total - leaves
+    const percentage = denominator > 0 ? Math.round((present / denominator) * 100) : 0
+
+    const deptDesignation = `${s.department || "Front Office"} / ${s.designation || s.role}`
 
     return [
       s.name,
-      s.role,
+      deptDesignation,
       `${total} Days`,
       `${present} Days`,
       `${absent} Days`,
+      `${Math.round(totalHours * 10) / 10}h (OT: +${Math.round(totalOvertime * 10) / 10}h)`,
       `${percentage}%`
     ]
   })
 
   autoTable(doc, {
     startY: 40,
-    head: [["Staff Name", "Role", "Tracked Days", "Present", "Absent", "Attendance Rate"]],
+    head: [["Staff Name", "Dept / Title", "Tracked", "Present", "Absent", "Hours & Overtime", "Rate"]],
     body: tableData,
     theme: 'striped',
     headStyles: { fillColor: [236, 72, 153] } // Pink-500 for attendance

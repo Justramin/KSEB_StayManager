@@ -132,10 +132,12 @@ export default function DashboardPage() {
 
   // Derived Stats - Staff Today
   const totalStaff = staff.length
-  const presentStaff = attendance.filter(a => a.status === "present").length
-  const absentStaff = attendance.filter(a => a.status === "absent").length
-  const unsubmittedStaff = totalStaff - (presentStaff + absentStaff)
-  const attendanceRate = totalStaff > 0 ? Math.round((presentStaff / totalStaff) * 100) : 0
+  const presentStaff = attendance.filter(a => ["Full Day", "Half Day", "active_shift", "present", "half_day", "late"].includes(a.status)).length
+  const absentStaff = attendance.filter(a => ["Absent", "absent"].includes(a.status)).length
+  const leaveStaff = attendance.filter(a => ["Leave", "on_leave", "holiday", "weekend"].includes(a.status)).length
+  const unsubmittedStaff = totalStaff - (presentStaff + absentStaff + leaveStaff)
+  const denominator = totalStaff - leaveStaff
+  const attendanceRate = denominator > 0 ? Math.round((presentStaff / denominator) * 100) : 0
 
   // Filtered lists for detail displays
   const getFilteredRooms = () => {
@@ -160,8 +162,8 @@ export default function DashboardPage() {
         status: record ? record.status : "Not Marked"
       }
     }).filter(s => {
-      if (staffFilter === "present") return s.status === "present"
-      if (staffFilter === "absent") return s.status === "absent"
+      if (staffFilter === "present") return ["Full Day", "Half Day", "active_shift", "present", "half_day", "late"].includes(s.status)
+      if (staffFilter === "absent") return ["Absent", "absent"].includes(s.status)
       return true
     })
   }
@@ -173,13 +175,39 @@ export default function DashboardPage() {
       checked_in: "bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20",
       checked_out: "bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/20",
       cleaning: "bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20",
-      present: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
-      absent: "bg-rose-500/10 text-rose-600 dark:text-rose-400",
-      "Not Marked": "bg-slate-500/10 text-slate-600 dark:text-slate-400"
+      "Full Day": "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20",
+      present: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20",
+      late: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20",
+      "Half Day": "bg-orange-500/10 text-orange-600 dark:text-orange-400 border-orange-500/20",
+      half_day: "bg-orange-500/10 text-orange-600 dark:text-orange-400 border-orange-500/20",
+      "Absent": "bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20",
+      absent: "bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20",
+      "Leave": "bg-sky-500/10 text-sky-600 dark:text-sky-400 border-sky-500/20",
+      on_leave: "bg-sky-500/10 text-sky-600 dark:text-sky-400 border-sky-500/20",
+      holiday: "bg-sky-500/10 text-sky-600 dark:text-sky-400 border-sky-500/20",
+      weekend: "bg-sky-500/10 text-sky-600 dark:text-sky-400 border-sky-500/20",
+      active_shift: "bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20 animate-pulse",
+      "Not Marked": "bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-500/20"
     }
+    const labelMap: Record<string, string> = {
+      present: "Full Day",
+      late: "Full Day",
+      "Full Day": "Full Day",
+      half_day: "Half Day",
+      "Half Day": "Half Day",
+      absent: "Absent",
+      "Absent": "Absent",
+      on_leave: "Leave",
+      holiday: "Leave",
+      weekend: "Leave",
+      "Leave": "Leave",
+      active_shift: "Active Shift",
+      "Not Marked": "Not Marked"
+    }
+    const label = labelMap[status] || status
     return (
-      <Badge variant="outline" className={cn("rounded-lg px-2.5 py-1 capitalize font-bold", map[status] || "")}>
-        {status.replace("_", " ")}
+      <Badge variant="outline" className={cn("rounded-lg px-2.5 py-1 font-bold", map[status] || "")}>
+        {label}
       </Badge>
     )
   }

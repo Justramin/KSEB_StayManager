@@ -86,8 +86,11 @@ CREATE TABLE bed_bookings (
 -- 7. STAFF TABLE
 CREATE TABLE staff (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    employee_id TEXT UNIQUE NOT NULL DEFAULT ('EMP-' || floor(random() * 900000 + 100000)::text),
     name TEXT NOT NULL,
     role TEXT NOT NULL,
+    designation TEXT,
+    department TEXT,
     phone_number TEXT,
     is_active BOOLEAN DEFAULT true,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
@@ -98,9 +101,32 @@ CREATE TABLE attendance (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     staff_id UUID NOT NULL REFERENCES staff(id) ON DELETE CASCADE,
     date DATE NOT NULL,
-    status TEXT NOT NULL CHECK (status IN ('present', 'absent')),
+    status TEXT NOT NULL CHECK (status IN ('present', 'absent', 'active_shift', 'late', 'half_day', 'on_leave', 'holiday', 'weekend')),
+    clock_in TIMESTAMP WITH TIME ZONE,
+    clock_out TIMESTAMP WITH TIME ZONE,
+    working_hours NUMERIC,
+    overtime_hours NUMERIC,
+    late_arrival BOOLEAN DEFAULT false,
+    early_departure BOOLEAN DEFAULT false,
+    remarks TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
     UNIQUE(staff_id, date)
+);
+
+-- 8b. ATTENDANCE AUDIT LOGS TABLE
+CREATE TABLE attendance_audit_logs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    attendance_id UUID NOT NULL REFERENCES attendance(id) ON DELETE CASCADE,
+    modified_by TEXT NOT NULL,
+    modified_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+    action TEXT NOT NULL, -- 'CLOCK_IN', 'CLOCK_OUT', 'UPDATE', 'DELETE'
+    old_status TEXT,
+    new_status TEXT,
+    old_clock_in TIMESTAMP WITH TIME ZONE,
+    new_clock_in TIMESTAMP WITH TIME ZONE,
+    old_clock_out TIMESTAMP WITH TIME ZONE,
+    new_clock_out TIMESTAMP WITH TIME ZONE,
+    remarks TEXT
 );
 
 -- Enable Row-Level Security (RLS) on all tables and configure public CRUD policies
@@ -112,6 +138,7 @@ ALTER TABLE beds ENABLE ROW LEVEL SECURITY;
 ALTER TABLE bed_bookings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE staff ENABLE ROW LEVEL SECURITY;
 ALTER TABLE attendance ENABLE ROW LEVEL SECURITY;
+ALTER TABLE attendance_audit_logs ENABLE ROW LEVEL SECURITY;
 
 -- 1. ROOMS POLICIES
 DROP POLICY IF EXISTS "Enable read access for all users" ON rooms;
@@ -201,16 +228,29 @@ CREATE POLICY "Enable insert access for all users" ON attendance FOR INSERT WITH
 CREATE POLICY "Enable update access for all users" ON attendance FOR UPDATE USING (true) WITH CHECK (true);
 CREATE POLICY "Enable delete access for all users" ON attendance FOR DELETE USING (true);
 
+-- 8b. ATTENDANCE AUDIT LOGS POLICIES
+DROP POLICY IF EXISTS "Enable read access for all users" ON attendance_audit_logs;
+DROP POLICY IF EXISTS "Enable insert access for all users" ON attendance_audit_logs;
+DROP POLICY IF EXISTS "Enable update access for all users" ON attendance_audit_logs;
+DROP POLICY IF EXISTS "Enable delete access for all users" ON attendance_audit_logs;
+
+CREATE POLICY "Enable read access for all users" ON attendance_audit_logs FOR SELECT USING (true);
+CREATE POLICY "Enable insert access for all users" ON attendance_audit_logs FOR INSERT WITH CHECK (true);
+CREATE POLICY "Enable update access for all users" ON attendance_audit_logs FOR UPDATE USING (true) WITH CHECK (true);
+CREATE POLICY "Enable delete access for all users" ON attendance_audit_logs FOR DELETE USING (true);
+
 
 -- Enable Postgres replication for realtime updates on all tables in Supabase Realtime publication
-ALTER PUBLICATION supabase_realtime ADD TABLE rooms;
-ALTER PUBLICATION supabase_realtime ADD TABLE bookings;
-ALTER PUBLICATION supabase_realtime ADD TABLE hall_bookings;
-ALTER PUBLICATION supabase_realtime ADD TABLE dormitories;
-ALTER PUBLICATION supabase_realtime ADD TABLE beds;
-ALTER PUBLICATION supabase_realtime ADD TABLE bed_bookings;
-ALTER PUBLICATION supabase_realtime ADD TABLE staff;
-ALTER PUBLICATION supabase_realtime ADD TABLE attendance;
+-- ALTER PUBLICATION supabase_realtime ADD TABLE rooms;
+-- ALTER PUBLICATION supabase_realtime ADD TABLE bookings;
+-- ALTER PUBLICATION supabase_realtime ADD TABLE hall_bookings;
+-- ALTER PUBLICATION supabase_realtime ADD TABLE dormitories;
+-- ALTER PUBLICATION supabase_realtime ADD TABLE beds;
+-- ALTER PUBLICATION supabase_realtime ADD TABLE bed_bookings;
+-- ALTER PUBLICATION supabase_realtime ADD TABLE staff;
+-- ALTER PUBLICATION supabase_realtime ADD TABLE attendance;
+-- ALTER PUBLICATION supabase_realtime ADD TABLE attendance_audit_logs;
+
 
 -- ==========================================
 -- Sample Seed Data
@@ -281,21 +321,21 @@ VALUES
 ON CONFLICT (id) DO NOTHING;
 
 -- Seed Staff members
-INSERT INTO staff (id, name, role, phone_number, is_active)
+INSERT INTO staff (id, employee_id, name, role, designation, department, phone_number, is_active)
 VALUES
-('55555555-5555-5555-5555-555555555551', 'Ramesh Kumar', 'General Manager', '+91 9000100010', true),
-('55555555-5555-5555-5555-555555555552', 'Suresh Nair', 'Receptionist', '+91 9000200020', true),
-('55555555-5555-5555-5555-555555555553', 'Sita Devi', 'Housekeeping Supervisor', '+91 9000300030', true),
-('55555555-5555-5555-5555-555555555554', 'Anil Pillai', 'Security Head', '+91 9000400040', true),
-('55555555-5555-5555-5555-555555555555', 'Vikram Singh', 'Maintenance Tech', '+91 9000500050', true)
+('55555555-5555-5555-5555-555555555551', 'EMP-001', 'Ramesh Kumar', 'General Manager', 'General Manager', 'Administration', '+91 9000100010', true),
+('55555555-5555-5555-5555-555555555552', 'EMP-002', 'Suresh Nair', 'Receptionist', 'Receptionist', 'Front Office', '+91 9000200020', true),
+('55555555-5555-5555-5555-555555555553', 'EMP-003', 'Sita Devi', 'Housekeeping Supervisor', 'Housekeeping Supervisor', 'Housekeeping', '+91 9000300030', true),
+('55555555-5555-5555-5555-555555555554', 'EMP-004', 'Anil Pillai', 'Security Head', 'Security Head', 'Security', '+91 9000400040', true),
+('55555555-5555-5555-5555-555555555555', 'EMP-005', 'Vikram Singh', 'Maintenance Tech', 'Maintenance Tech', 'Maintenance', '+91 9000500050', true)
 ON CONFLICT (id) DO NOTHING;
 
 -- Seed Attendance records
-INSERT INTO attendance (id, staff_id, date, status)
+INSERT INTO attendance (id, staff_id, date, status, clock_in, clock_out, working_hours, overtime_hours, late_arrival, early_departure)
 VALUES
-('66666666-6666-6666-6666-666666666661', '55555555-5555-5555-5555-555555555551', CURRENT_DATE, 'present'),
-('66666666-6666-6666-6666-666666666662', '55555555-5555-5555-5555-555555555552', CURRENT_DATE, 'present'),
-('66666666-6666-6666-6666-666666666663', '55555555-5555-5555-5555-555555555553', CURRENT_DATE, 'present'),
-('66666666-6666-6666-6666-666666666664', '55555555-5555-5555-5555-555555555554', CURRENT_DATE, 'absent'),
-('66666666-6666-6666-6666-666666666665', '55555555-5555-5555-5555-555555555555', CURRENT_DATE, 'present')
+('66666666-6666-6666-6666-666666666661', '55555555-5555-5555-5555-555555555551', CURRENT_DATE, 'present', (CURRENT_DATE + TIME '09:00:00')::timestamp with time zone, (CURRENT_DATE + TIME '17:00:00')::timestamp with time zone, 8.0, 0.0, false, false),
+('66666666-6666-6666-6666-666666666662', '55555555-5555-5555-5555-555555555552', CURRENT_DATE, 'present', (CURRENT_DATE + TIME '08:45:00')::timestamp with time zone, (CURRENT_DATE + TIME '17:15:00')::timestamp with time zone, 8.5, 0.5, false, false),
+('66666666-6666-6666-6666-666666666663', '55555555-5555-5555-5555-555555555553', CURRENT_DATE, 'present', (CURRENT_DATE + TIME '09:00:00')::timestamp with time zone, (CURRENT_DATE + TIME '17:00:00')::timestamp with time zone, 8.0, 0.0, false, false),
+('66666666-6666-6666-6666-666666666664', '55555555-5555-5555-5555-555555555554', CURRENT_DATE, 'absent', NULL, NULL, 0.0, 0.0, false, false),
+('66666666-6666-6666-6666-666666666665', '55555555-5555-5555-5555-555555555555', CURRENT_DATE, 'present', (CURRENT_DATE + TIME '09:30:00')::timestamp with time zone, (CURRENT_DATE + TIME '17:30:00')::timestamp with time zone, 8.0, 0.0, true, false)
 ON CONFLICT (staff_id, date) DO NOTHING;
