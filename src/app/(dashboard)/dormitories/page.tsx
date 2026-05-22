@@ -52,7 +52,7 @@ import { format, differenceInCalendarDays } from "date-fns"
 
 export default function DormitoriesPage() {
   const supabase = createClient()
-  
+
   // Data states
   const [dormitories, setDormitories] = useState<any[]>([])
   const [selectedDormId, setSelectedDormId] = useState<string>("")
@@ -84,6 +84,8 @@ export default function DormitoriesPage() {
   // Selected Bed Details Panel (for side drawer or modal)
   const [focusedBed, setFocusedBed] = useState<any>(null)
   const [focusedBedBooking, setFocusedBedBooking] = useState<any>(null)
+  const [selectedBeds, setSelectedBeds] = useState<any[]>([])
+  const [focusedBedGroupBookings, setFocusedBedGroupBookings] = useState<any[]>([])
 
   // Edit Dormitory Dialog
   const [isEditDormOpen, setIsEditDormOpen] = useState(false)
@@ -174,10 +176,12 @@ export default function DormitoriesPage() {
         .eq("is_active", true)
         .order("bed_number", { ascending: true })
       setBeds(data || [])
-      
-      // Clear focused bed when switching dorms
+
+      // Clear focused bed and selections when switching dorms
       setFocusedBed(null)
       setFocusedBedBooking(null)
+      setSelectedBeds([])
+      setFocusedBedGroupBookings([])
     } catch (err) {
       console.error(err)
       toast.error("Failed to fetch beds for dormitory")
@@ -293,7 +297,7 @@ export default function DormitoriesPage() {
       if (error) throw error
       toast.success("Bed space properties updated")
       setIsEditBedOpen(false)
-      
+
       // Update focused bed properties
       setFocusedBed((prev: any) => ({
         ...prev,
@@ -302,7 +306,7 @@ export default function DormitoriesPage() {
         row_index: editBedRow,
         col_index: editBedCol
       }))
-      
+
       fetchDormBeds(selectedDormId)
     } catch (err: any) {
       toast.error("Failed to update bed: " + err.message)
@@ -454,7 +458,7 @@ export default function DormitoriesPage() {
       // 2. Generate Beds in bulk
       const newBeds: any[] = []
       const prefix = dormName.toLowerCase().includes("ladies") ? "L" : "G"
-      
+
       for (let r = 0; r < dormRows; r++) {
         for (let c = 0; c < dormCols; c++) {
           const rowLetter = String.fromCharCode(65 + r) // A, B, C, D...
@@ -476,14 +480,14 @@ export default function DormitoriesPage() {
       toast.success(`Dormitory "${dormName}" created with ${dormRows * dormCols} beds!`)
       setIsCreateDormOpen(false)
       setDormName("")
-      
+
       // Refresh list
       const { data } = await supabase
         .from("dormitories")
         .select("*")
         .eq("is_active", true)
         .order("name", { ascending: true })
-      
+
       setDormitories(data || [])
       setSelectedDormId(createdDorm.id)
     } catch (err: any) {
@@ -497,7 +501,8 @@ export default function DormitoriesPage() {
   async function handleFocusBed(bed: any) {
     setFocusedBed(bed)
     setFocusedBedBooking(null)
-    
+    setFocusedBedGroupBookings([])
+
     if (bed.current_status !== "available") {
       try {
         const { data } = await supabase
@@ -508,11 +513,200 @@ export default function DormitoriesPage() {
           .order("created_at", { ascending: false })
 
         if (data && data.length > 0) {
-          setFocusedBedBooking(data[0])
+          const booking = data[0]
+          setFocusedBedBooking(booking)
+          if (booking.booking_reference) {
+            const { data: groupData } = await supabase
+              .from("bed_bookings")
+              .select("*, beds(bed_number)")
+              .eq("booking_reference", booking.booking_reference)
+            setFocusedBedGroupBookings(groupData || [])
+          }
         }
       } catch (err) {
         console.error(err)
       }
+    }
+  }
+
+  // Handle bed click on the visual grid
+  function handleGridBedClick(bed: any) {
+    if (bed.current_status === "available") {
+      const isSelected = selectedBeds.some(sb => sb.id === bed.id)
+      let newSelected = []
+      if (isSelected) {
+        newSelected = selectedBeds.filter(sb => sb.id !== bed.id)
+      } else {
+        newSelected = [...selectedBeds, bed]
+      }
+      setSelectedBeds(newSelected)
+      
+      if (newSelected.length > 0) {
+        setFocusedBed(newSelected[newSelected.length - 1])
+        setFocusedBedBooking(null)
+        setFocusedBedGroupBookings([])
+      } else {
+        setFocusedBed(null)
+        setFocusedBedBooking(null)
+        setFocusedBedGroupBookings([])
+      }
+    } else {
+      setSelectedBeds([])
+      handleFocusBed(bed)
+    }
+  }
+
+  // Check in all booked beds in a group booking
+  async function handleGroupCheckin(booking: any) {
+    if (!booking.booking_reference) return
+    try {
+      // Find all bookings with this reference that are still 'booked'
+      const { data: groupBookings } = await supabase
+        .from("bed_bookings")
+        .select("id, bed_id")
+        .eq("booking_reference", booking.booking_reference)
+        .eq("status", "booked")
+
+      if (!groupBookings || groupBookings.length === 0) return
+
+      const bookingIds = groupBookings.map(gb => gb.id)
+      const bedIds = groupBookings.map(gb => gb.bed_id)
+
+      // Update bookings to checked_in
+      const { error: bookingErr } = await supabase
+        .from("bed_bookings")
+        .update({ status: "checked_in", check_in_date: new Date().toISOString() })
+        .in("id", bookingIds)
+
+      if (bookingErr) throw bookingErr
+
+      // Update beds status to checked_in
+      const { error: bedErr } = await supabase
+        .from("beds")
+        .update({ current_status: "checked_in" })
+        .in("id", bedIds)
+
+      if (bedErr) throw bedErr
+
+      toast.success(`Group check-in completed for ${booking.customer_name}`)
+      if (focusedBed) {
+        handleFocusBed(focusedBed)
+      }
+      fetchDormBeds(selectedDormId)
+    } catch (err: any) {
+      toast.error("Group check-in failed: " + err.message)
+    }
+  }
+
+  // Check out all checked-in beds in a group booking
+  async function handleGroupCheckout(booking: any) {
+    if (!booking.booking_reference) return
+    try {
+      // Find all bookings with this reference that are checked_in
+      const { data: groupBookings } = await supabase
+        .from("bed_bookings")
+        .select("id, bed_id")
+        .eq("booking_reference", booking.booking_reference)
+        .eq("status", "checked_in")
+
+      if (!groupBookings || groupBookings.length === 0) return
+
+      const bookingIds = groupBookings.map(gb => gb.id)
+      const bedIds = groupBookings.map(gb => gb.bed_id)
+
+      // Update bookings to checked_out
+      const { error: bookingErr } = await supabase
+        .from("bed_bookings")
+        .update({
+          status: "checked_out",
+          check_out_date: new Date().toISOString()
+        })
+        .in("id", bookingIds)
+
+      if (bookingErr) throw bookingErr
+
+      // Update beds status to cleaning
+      const { error: bedErr } = await supabase
+        .from("beds")
+        .update({ current_status: "cleaning" })
+        .in("id", bedIds)
+
+      if (bedErr) throw bedErr
+
+      toast.success(`Group checkout completed. ${bedIds.length} beds sent to cleaning.`)
+      setFocusedBed(null)
+      setFocusedBedBooking(null)
+      setFocusedBedGroupBookings([])
+      fetchDormBeds(selectedDormId)
+    } catch (err: any) {
+      toast.error("Group checkout failed: " + err.message)
+    }
+  }
+
+  // Cancel reservation for a single bed booking
+  async function handleCancelBedBooking(bed: any, booking: any) {
+    try {
+      const { error: bookingErr } = await supabase
+        .from("bed_bookings")
+        .delete()
+        .eq("id", booking.id)
+
+      if (bookingErr) throw bookingErr
+
+      const { error: bedErr } = await supabase
+        .from("beds")
+        .update({ current_status: "available" })
+        .eq("id", bed.id)
+
+      if (bedErr) throw bedErr
+
+      toast.success(`Booking for bed ${bed.bed_number} cancelled successfully`)
+      setFocusedBed(null)
+      setFocusedBedBooking(null)
+      setFocusedBedGroupBookings([])
+      fetchDormBeds(selectedDormId)
+    } catch (err: any) {
+      toast.error("Failed to cancel booking: " + err.message)
+    }
+  }
+
+  // Cancel group reservation (all bookings in group)
+  async function handleCancelGroupBooking(booking: any) {
+    if (!booking.booking_reference) return
+    try {
+      const { data: groupBookings } = await supabase
+        .from("bed_bookings")
+        .select("id, bed_id")
+        .eq("booking_reference", booking.booking_reference)
+
+      if (!groupBookings || groupBookings.length === 0) return
+
+      const bookingIds = groupBookings.map(gb => gb.id)
+      const bedIds = groupBookings.map(gb => gb.bed_id)
+
+      // Delete all bookings in group
+      const { error: bookingErr } = await supabase
+        .from("bed_bookings")
+        .delete()
+        .in("id", bookingIds)
+
+      if (bookingErr) throw bookingErr
+
+      // Set all beds to available
+      const { error: bedErr } = await supabase
+        .from("beds")
+        .update({ current_status: "available" })
+        .in("id", bedIds)
+
+      if (bedErr) throw bedErr
+
+      toast.success("Group booking cancelled successfully")
+      setFocusedBed(null)
+      setFocusedBedBooking(null)
+      setFocusedBedGroupBookings([])
+      fetchDormBeds(selectedDormId)
+    } catch (err: any) {
+      toast.error("Failed to cancel group booking: " + err.message)
     }
   }
 
@@ -574,9 +768,9 @@ export default function DormitoriesPage() {
     }
   }
 
-  // Open Booking Dialog for available bed
-  function triggerBedBooking(bed: any) {
-    setSelectedBedForBooking(bed)
+  // Open Booking Dialog for available bed(s)
+  function triggerBedBooking(bedOrBeds: any) {
+    setSelectedBedForBooking(bedOrBeds)
     setCustomerName("")
     setPhoneNumber("")
     setCheckinDate(new Date())
@@ -590,29 +784,44 @@ export default function DormitoriesPage() {
     if (!customerName.trim() || !selectedBedForBooking) return
     setSubmittingBooking(true)
     try {
-      // 1. Insert booking
+      const bedsToBook = Array.isArray(selectedBedForBooking)
+        ? selectedBedForBooking
+        : [selectedBedForBooking]
+
+      const bookingReference = crypto.randomUUID()
+
+      // 1. Insert bookings
+      const bookingsToInsert = bedsToBook.map(bed => ({
+        customer_name: customerName,
+        phone_number: phoneNumber || null,
+        bed_id: bed.id,
+        check_in_date: checkinDate.toISOString(),
+        status: bookingType, // "booked" or "checked_in"
+        booking_reference: bookingReference
+      }))
+
       const { error: bookingErr } = await supabase
         .from("bed_bookings")
-        .insert([{
-          customer_name: customerName,
-          phone_number: phoneNumber,
-          bed_id: selectedBedForBooking.id,
-          check_in_date: checkinDate.toISOString(),
-          status: bookingType, // "booked" or "checked_in"
-        }])
+        .insert(bookingsToInsert)
 
       if (bookingErr) throw bookingErr
 
-      // 2. Update bed status
+      // 2. Update beds status
+      const bedIds = bedsToBook.map(bed => bed.id)
       const { error: bedErr } = await supabase
         .from("beds")
         .update({ current_status: bookingType })
-        .eq("id", selectedBedForBooking.id)
+        .in("id", bedIds)
 
       if (bedErr) throw bedErr
 
-      toast.success(`Booking successful for Bed ${selectedBedForBooking.bed_number}`)
+      toast.success(
+        bedsToBook.length === 1
+          ? `Booking successful for Bed ${bedsToBook[0].bed_number}`
+          : `Group booking of ${bedsToBook.length} beds successful!`
+      )
       setIsBookingOpen(false)
+      setSelectedBeds([])
       fetchDormBeds(selectedDormId)
     } catch (err: any) {
       toast.error("Booking failed: " + err.message)
@@ -666,21 +875,21 @@ export default function DormitoriesPage() {
   // Organize beds into a row x column matrix for visual representation
   const getBedsMatrix = () => {
     if (beds.length === 0) return []
-    
+
     // Find max row and col to size the grid dynamically
     const maxRow = Math.max(...beds.map(b => b.row_index))
     const maxCol = Math.max(...beds.map(b => b.col_index))
-    
-    const matrix: any[][] = Array.from({ length: maxRow + 1 }, () => 
+
+    const matrix: any[][] = Array.from({ length: maxRow + 1 }, () =>
       Array.from({ length: maxCol + 1 }, () => null)
     )
-    
+
     beds.forEach(bed => {
       if (bed.row_index <= maxRow && bed.col_index <= maxCol) {
         matrix[bed.row_index][bed.col_index] = bed
       }
     })
-    
+
     return matrix
   }
 
@@ -697,7 +906,7 @@ export default function DormitoriesPage() {
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
-      
+
       {/* Header Panel */}
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
         <div className="space-y-1">
@@ -721,7 +930,7 @@ export default function DormitoriesPage() {
               <Plus className="mr-2 h-5 w-5" /> Add Bed Space
             </Button>
           )}
-          <Button 
+          <Button
             className="rounded-xl font-bold shadow-lg shadow-primary/25 h-11 px-6"
             onClick={() => setIsCreateDormOpen(true)}
           >
@@ -732,7 +941,7 @@ export default function DormitoriesPage() {
 
       {/* Main workspace */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        
+
         {/* Left 2 Cols: Dorm Visual Layout */}
         <Card className="lg:col-span-2 glass-card border-none overflow-hidden flex flex-col min-h-[500px]">
           <CardHeader className="py-6 border-b border-white/10 dark:border-white/5 flex flex-row items-center justify-between gap-4">
@@ -797,7 +1006,7 @@ export default function DormitoriesPage() {
                 </div>
               )}
             </div>
-            
+
             <div className="flex flex-wrap gap-2 text-xs font-semibold">
               <Badge className="bg-emerald-500/10 text-emerald-500 border-emerald-500/20" variant="outline">Available</Badge>
               <Badge className="bg-amber-500/10 text-amber-500 border-amber-500/20" variant="outline">Booked</Badge>
@@ -805,7 +1014,7 @@ export default function DormitoriesPage() {
               <Badge className="bg-rose-500/10 text-rose-500 border-rose-500/20" variant="outline">Cleaning</Badge>
             </div>
           </CardHeader>
-          
+
           <CardContent className="flex-1 p-6 md:p-8 flex flex-col justify-between">
             {loading ? (
               <div className="py-20 flex-1 flex flex-col items-center justify-center gap-2">
@@ -818,7 +1027,7 @@ export default function DormitoriesPage() {
               </div>
             ) : (
               <div className="space-y-8 flex-1 flex flex-col justify-center">
-                
+
                 {/* Visual Theater screen / stage indicator */}
                 <div className="relative mx-auto w-full max-w-lg">
                   <div className="h-2 w-full bg-primary/20 dark:bg-primary/10 rounded-full blur-[2px]" />
@@ -836,25 +1045,30 @@ export default function DormitoriesPage() {
                         <div className="w-6 text-sm font-bold text-muted-foreground/60 text-center uppercase">
                           {String.fromCharCode(65 + rIndex)}
                         </div>
-                        
+
                         {/* Bed blocks */}
                         <div className="flex gap-4">
                           {row.map((bed, cIndex) => {
                             if (!bed) return <div key={cIndex} className="size-14 border border-dashed border-white/5 rounded-xl opacity-30" />
                             const colors = statusColors[bed.current_status] || statusColors.available
                             const isFocused = focusedBed?.id === bed.id
-                            
+                            const isSelected = selectedBeds.some(sb => sb.id === bed.id)
+
                             return (
                               <motion.button
                                 key={bed.id}
                                 whileHover={{ scale: 1.05 }}
                                 whileTap={{ scale: 0.95 }}
-                                onClick={() => handleFocusBed(bed)}
+                                onClick={() => handleGridBedClick(bed)}
                                 className={cn(
                                   "size-14 md:size-16 rounded-xl border-2 flex flex-col items-center justify-center relative cursor-pointer transition-all duration-300",
                                   colors.bg,
                                   colors.border,
-                                  isFocused ? "ring-2 ring-primary scale-105" : ""
+                                  isSelected
+                                    ? "ring-2 ring-violet-500 scale-105 border-violet-500"
+                                    : isFocused
+                                    ? "ring-2 ring-primary scale-105"
+                                    : ""
                                 )}
                               >
                                 <Bed className={cn("size-5 md:size-6 mb-0.5", colors.text)} />
@@ -890,7 +1104,43 @@ export default function DormitoriesPage() {
 
           <CardContent className="flex-1 p-6 space-y-6">
             <AnimatePresence mode="wait">
-              {focusedBed ? (
+              {selectedBeds.length > 0 ? (
+                <motion.div
+                  key="group-selection"
+                  initial={{ opacity: 0, x: 10 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0 }}
+                  className="space-y-6"
+                >
+                  <div className="bg-violet-500/10 p-4 border border-violet-500/20 rounded-xl text-foreground">
+                    <div className="text-sm font-bold text-violet-500 uppercase">Group Selection</div>
+                    <div className="text-2xl font-black mt-0.5">{selectedBeds.length} Beds Selected</div>
+                    <div className="mt-3 flex flex-wrap gap-1.5">
+                      {selectedBeds.map(b => (
+                        <Badge key={b.id} className="bg-violet-500/20 text-violet-400 border-violet-500/30">
+                          {b.bed_number}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="space-y-2 pt-4">
+                    <Button
+                      className="w-full rounded-xl font-bold bg-violet-600 hover:bg-violet-700 h-11"
+                      onClick={() => triggerBedBooking(selectedBeds)}
+                    >
+                      <LogIn className="size-4 mr-2" /> Book Group ({selectedBeds.length} Beds)
+                    </Button>
+                    <Button
+                      variant="outline"
+                      className="w-full rounded-xl font-bold border-white/10 hover:bg-white/5 h-11 text-foreground"
+                      onClick={() => setSelectedBeds([])}
+                    >
+                      Clear Selection
+                    </Button>
+                  </div>
+                </motion.div>
+              ) : focusedBed ? (
                 <motion.div
                   key={focusedBed.id}
                   initial={{ opacity: 0, x: 10 }}
@@ -962,7 +1212,35 @@ export default function DormitoriesPage() {
                           <span className="text-muted-foreground font-semibold">Check-in Date:</span>
                           <span className="font-bold">{format(new Date(focusedBedBooking.check_in_date), "MMM d, yyyy")}</span>
                         </div>
-                        {/* Payment Status indicator removed */}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Linked beds in group booking */}
+                  {focusedBedGroupBookings.length > 1 && (
+                    <div className="p-4 bg-purple-500/5 border border-purple-500/10 rounded-xl space-y-3">
+                      <h4 className="font-bold text-sm text-purple-500 flex items-center gap-1.5">
+                        <Bed className="size-4" /> Group Booking Details
+                      </h4>
+                      <div className="space-y-2">
+                        <div className="text-xs text-muted-foreground">
+                          This bed is part of a group booking. Linked beds:
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {focusedBedGroupBookings.map((gb: any) => (
+                            <Badge
+                              key={gb.id}
+                              variant={gb.bed_id === focusedBed.id ? "default" : "outline"}
+                              className={cn(
+                                gb.bed_id === focusedBed.id
+                                  ? "bg-purple-600 text-white"
+                                  : "bg-purple-500/10 text-purple-400 border-purple-500/20"
+                              )}
+                            >
+                              {gb.beds?.bed_number || `Bed ${gb.bed_id.substring(0, 4)}`} ({gb.status})
+                            </Badge>
+                          ))}
+                        </div>
                       </div>
                     </div>
                   )}
@@ -977,23 +1255,84 @@ export default function DormitoriesPage() {
                         <LogIn className="size-4 mr-2" /> Book / Check-In Bed
                       </Button>
                     )}
-                    
+
                     {focusedBed.current_status === "booked" && focusedBedBooking && (
-                      <Button
-                        className="w-full rounded-xl font-bold bg-blue-600 hover:bg-blue-700 h-11"
-                        onClick={() => handleCheckinBedBooking(focusedBed, focusedBedBooking)}
-                      >
-                        <CheckCircle className="size-4 mr-2" /> Check-In Guest
-                      </Button>
+                      <div className="space-y-2">
+                        {focusedBedGroupBookings.length > 1 ? (
+                          <>
+                            <Button
+                              className="w-full rounded-xl font-bold bg-blue-600 hover:bg-blue-700 h-11"
+                              onClick={() => handleGroupCheckin(focusedBedBooking)}
+                            >
+                              <CheckCircle className="size-4 mr-2" /> Check-In Group ({focusedBedGroupBookings.filter((gb: any) => gb.status === 'booked').length} Beds)
+                            </Button>
+                            <Button
+                              variant="outline"
+                              className="w-full rounded-xl font-bold border-white/10 hover:bg-white/5 h-11 text-foreground"
+                              onClick={() => handleCheckinBedBooking(focusedBed, focusedBedBooking)}
+                            >
+                              Check-In Bed Only
+                            </Button>
+                            <Button
+                              className="w-full rounded-xl font-bold bg-rose-600 hover:bg-rose-700 h-11 mt-2"
+                              onClick={() => handleCancelGroupBooking(focusedBedBooking)}
+                            >
+                              <Trash2 className="size-4 mr-2" /> Cancel Group Booking
+                            </Button>
+                            <Button
+                              variant="outline"
+                              className="w-full rounded-xl font-bold border-rose-500/20 hover:bg-rose-500/10 text-rose-500 h-11"
+                              onClick={() => handleCancelBedBooking(focusedBed, focusedBedBooking)}
+                            >
+                              Cancel Bed Booking Only
+                            </Button>
+                          </>
+                        ) : (
+                          <>
+                            <Button
+                              className="w-full rounded-xl font-bold bg-blue-600 hover:bg-blue-700 h-11"
+                              onClick={() => handleCheckinBedBooking(focusedBed, focusedBedBooking)}
+                            >
+                              <CheckCircle className="size-4 mr-2" /> Check-In Guest
+                            </Button>
+                            <Button
+                              className="w-full rounded-xl font-bold bg-rose-600 hover:bg-rose-700 h-11"
+                              onClick={() => handleCancelBedBooking(focusedBed, focusedBedBooking)}
+                            >
+                              <Trash2 className="size-4 mr-2" /> Cancel Reservation
+                            </Button>
+                          </>
+                        )}
+                      </div>
                     )}
 
                     {focusedBed.current_status === "checked_in" && focusedBedBooking && (
-                      <Button
-                        className="w-full rounded-xl font-bold bg-purple-600 hover:bg-purple-700 h-11"
-                        onClick={() => triggerBedCheckout(focusedBed, focusedBedBooking)}
-                      >
-                        <LogOut className="size-4 mr-2" /> Process Check-Out
-                      </Button>
+                      <div className="space-y-2">
+                        {focusedBedGroupBookings.length > 1 ? (
+                          <>
+                            <Button
+                              className="w-full rounded-xl font-bold bg-purple-600 hover:bg-purple-700 h-11"
+                              onClick={() => handleGroupCheckout(focusedBedBooking)}
+                            >
+                              <LogOut className="size-4 mr-2" /> Process Group Checkout
+                            </Button>
+                            <Button
+                              variant="outline"
+                              className="w-full rounded-xl font-bold border-white/10 hover:bg-white/5 h-11 text-foreground"
+                              onClick={() => triggerBedCheckout(focusedBed, focusedBedBooking)}
+                            >
+                              Process Bed Checkout Only
+                            </Button>
+                          </>
+                        ) : (
+                          <Button
+                            className="w-full rounded-xl font-bold bg-purple-600 hover:bg-purple-700 h-11"
+                            onClick={() => triggerBedCheckout(focusedBed, focusedBedBooking)}
+                          >
+                            <LogOut className="size-4 mr-2" /> Process Check-Out
+                          </Button>
+                        )}
+                      </div>
                     )}
 
                     {focusedBed.current_status === "cleaning" && (
@@ -1035,7 +1374,7 @@ export default function DormitoriesPage() {
                 required
               />
             </div>
-            
+
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1.5">
                 <Label htmlFor="rows" className="font-bold">Layout Rows (A-Z)</Label>
@@ -1050,7 +1389,7 @@ export default function DormitoriesPage() {
                   </SelectContent>
                 </Select>
               </div>
-              
+
               <div className="space-y-1.5">
                 <Label htmlFor="cols" className="font-bold">Layout Columns (1-10)</Label>
                 <Select value={String(dormCols)} onValueChange={val => setDormCols(Number(val))}>
@@ -1082,10 +1421,24 @@ export default function DormitoriesPage() {
           <DialogHeader>
             <DialogTitle className="text-xl font-bold flex items-center gap-2">
               <Sparkles className="size-5 text-violet-500" />
-              Book Bed space: {selectedBedForBooking?.bed_number}
+              {Array.isArray(selectedBedForBooking)
+                ? `Book Group Booking (${selectedBedForBooking.length} Beds)`
+                : `Book Bed Space: ${selectedBedForBooking?.bed_number}`}
             </DialogTitle>
           </DialogHeader>
           <form onSubmit={handleSaveBedBooking} className="space-y-4 pt-2">
+            {Array.isArray(selectedBedForBooking) && (
+              <div className="p-3 bg-violet-500/5 border border-violet-500/10 rounded-xl space-y-1.5">
+                <div className="text-xs font-bold text-muted-foreground uppercase">Selected Beds</div>
+                <div className="flex flex-wrap gap-1.5">
+                  {selectedBedForBooking.map(b => (
+                    <Badge key={b.id} className="bg-violet-500/20 text-violet-400 border-violet-500/30">
+                      {b.bed_number}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            )}
             <div className="space-y-1.5">
               <Label className="font-bold flex items-center gap-1.5"><User className="size-3.5" /> Customer Name *</Label>
               <Input
@@ -1096,7 +1449,7 @@ export default function DormitoriesPage() {
                 required
               />
             </div>
-            
+
             <div className="space-y-1.5">
               <Label className="font-bold flex items-center gap-1.5"><Phone className="size-3.5" /> Phone Number (Optional)</Label>
               <Input
@@ -1122,7 +1475,7 @@ export default function DormitoriesPage() {
                       mode="single"
                       selected={checkinDate}
                       onSelect={(d) => d && setCheckinDate(d)}
-                      disabled={d => d < new Date(new Date().setHours(0,0,0,0))}
+                      disabled={d => d < new Date(new Date().setHours(0, 0, 0, 0))}
                     />
                   </PopoverContent>
                 </Popover>

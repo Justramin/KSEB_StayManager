@@ -80,6 +80,7 @@ CREATE TABLE bed_bookings (
     check_in_date TIMESTAMP WITH TIME ZONE NOT NULL,
     check_out_date TIMESTAMP WITH TIME ZONE,
     status TEXT NOT NULL DEFAULT 'booked' CHECK (status IN ('booked', 'checked_in', 'checked_out', 'cancelled')),
+    booking_reference UUID NOT NULL DEFAULT gen_random_uuid(),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 

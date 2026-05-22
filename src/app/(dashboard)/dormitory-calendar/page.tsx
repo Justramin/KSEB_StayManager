@@ -74,6 +74,7 @@ export default function DormitoryCalendarPage() {
   const [selectedBooking, setSelectedBooking] = useState<any>(null)
   const [selectedBed, setSelectedBed] = useState<any>(null)
   const [selectedCellDate, setSelectedCellDate] = useState<Date | null>(null)
+  const [groupBookings, setGroupBookings] = useState<any[]>([])
 
   // Booking Form fields
   const [customerName, setCustomerName] = useState("")
@@ -85,6 +86,26 @@ export default function DormitoryCalendarPage() {
   useEffect(() => {
     fetchInitialData()
   }, [])
+
+  // Load group bookings when selectedBooking changes
+  useEffect(() => {
+    async function loadGroupBookings() {
+      if (selectedBooking?.booking_reference) {
+        try {
+          const { data } = await supabase
+            .from("bed_bookings")
+            .select("*, beds(*, dormitories(*))")
+            .eq("booking_reference", selectedBooking.booking_reference)
+          setGroupBookings(data || [])
+        } catch (err) {
+          console.error("Error loading group bookings:", err)
+        }
+      } else {
+        setGroupBookings([])
+      }
+    }
+    loadGroupBookings()
+  }, [selectedBooking])
 
   // Refetch data when Selected Dorm changes & listen to realtime updates
   useEffect(() => {
@@ -311,6 +332,44 @@ export default function DormitoryCalendarPage() {
     }
   }
 
+  // Business logic transition - Check In Group
+  const handleCheckinGroup = async (booking: any) => {
+    if (!booking.booking_reference) return
+    try {
+      // Find all bookings with this reference that are still 'booked'
+      const { data: groupBookingsData } = await supabase
+        .from("bed_bookings")
+        .select("id, bed_id")
+        .eq("booking_reference", booking.booking_reference)
+        .eq("status", "booked")
+
+      if (!groupBookingsData || groupBookingsData.length === 0) return
+
+      const bookingIds = groupBookingsData.map(gb => gb.id)
+      const bedIds = groupBookingsData.map(gb => gb.bed_id)
+
+      const { error: bookingErr } = await supabase
+        .from("bed_bookings")
+        .update({ status: "checked_in", check_in_date: new Date().toISOString() })
+        .in("id", bookingIds)
+
+      if (bookingErr) throw bookingErr
+
+      const { error: bedErr } = await supabase
+        .from("beds")
+        .update({ current_status: "checked_in" })
+        .in("id", bedIds)
+
+      if (bedErr) throw bedErr
+
+      toast.success(`Group check-in completed for ${booking.customer_name} (${bookingIds.length} beds)`)
+      setIsDetailsOpen(false)
+      refreshAll()
+    } catch (err: any) {
+      toast.error("Group check-in failed: " + err.message)
+    }
+  }
+
   // Business logic transition - Process Check Out
   const handleCheckoutGuest = async (booking: any) => {
     try {
@@ -336,6 +395,47 @@ export default function DormitoryCalendarPage() {
       refreshAll()
     } catch (err: any) {
       toast.error("Check-out error: " + err.message)
+    }
+  }
+
+  // Business logic transition - Check Out Group
+  const handleCheckoutGroup = async (booking: any) => {
+    if (!booking.booking_reference) return
+    try {
+      // Find all bookings with this reference that are checked_in
+      const { data: groupBookingsData } = await supabase
+        .from("bed_bookings")
+        .select("id, bed_id")
+        .eq("booking_reference", booking.booking_reference)
+        .eq("status", "checked_in")
+
+      if (!groupBookingsData || groupBookingsData.length === 0) return
+
+      const bookingIds = groupBookingsData.map(gb => gb.id)
+      const bedIds = groupBookingsData.map(gb => gb.bed_id)
+
+      const { error: bookingErr } = await supabase
+        .from("bed_bookings")
+        .update({
+          status: "checked_out",
+          check_out_date: new Date().toISOString()
+        })
+        .in("id", bookingIds)
+
+      if (bookingErr) throw bookingErr
+
+      const { error: bedErr } = await supabase
+        .from("beds")
+        .update({ current_status: "cleaning" })
+        .in("id", bedIds)
+
+      if (bedErr) throw bedErr
+
+      toast.success(`Group checkout completed. ${bedIds.length} beds sent to cleaning.`)
+      setIsDetailsOpen(false)
+      refreshAll()
+    } catch (err: any) {
+      toast.error("Group checkout failed: " + err.message)
     }
   }
 
@@ -382,6 +482,44 @@ export default function DormitoryCalendarPage() {
     }
   }
 
+  // Business logic transition - Cancel Group Booking
+  const handleCancelGroupBooking = async (booking: any) => {
+    if (!booking.booking_reference) return
+    try {
+      const { data: groupBookingsData } = await supabase
+        .from("bed_bookings")
+        .select("id, bed_id")
+        .eq("booking_reference", booking.booking_reference)
+
+      if (!groupBookingsData || groupBookingsData.length === 0) return
+
+      const bookingIds = groupBookingsData.map(gb => gb.id)
+      const bedIds = groupBookingsData.map(gb => gb.bed_id)
+
+      // Delete all bookings in group
+      const { error: bookingErr } = await supabase
+        .from("bed_bookings")
+        .delete()
+        .in("id", bookingIds)
+
+      if (bookingErr) throw bookingErr
+
+      // Set all beds to available
+      const { error: bedErr } = await supabase
+        .from("beds")
+        .update({ current_status: "available" })
+        .in("id", bedIds)
+
+      if (bedErr) throw bedErr
+
+      toast.success("Group booking cancelled successfully")
+      setIsDetailsOpen(false)
+      refreshAll()
+    } catch (err: any) {
+      toast.error("Failed to cancel group booking: " + err.message)
+    }
+  }
+
   // Submit new booking
   const handleSaveBooking = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -393,10 +531,11 @@ export default function DormitoryCalendarPage() {
         .from("bed_bookings")
         .insert([{
           customer_name: customerName,
-          phone_number: phoneNumber,
+          phone_number: phoneNumber || null,
           bed_id: selectedBed.id,
           check_in_date: checkinDate.toISOString(),
-          status: bookingType
+          status: bookingType,
+          booking_reference: crypto.randomUUID()
         }])
 
       if (bookingErr) throw bookingErr
@@ -892,6 +1031,36 @@ export default function DormitoryCalendarPage() {
                 </div>
               </div>
 
+              {/* GROUP BOOKING INFO */}
+              {groupBookings.length > 1 && (
+                <div className="p-4 bg-violet-500/5 border border-violet-500/10 rounded-xl space-y-2">
+                  <div className="flex items-center justify-between border-b border-white/5 pb-1">
+                    <span className="font-bold text-violet-400 text-xs uppercase tracking-wider">Group Booking</span>
+                    <span className="text-[10px] text-muted-foreground font-mono">
+                      Ref: {selectedBooking.booking_reference.substring(0, 8)}...
+                    </span>
+                  </div>
+                  <div className="text-xs text-slate-300">
+                    This bed is booked as part of a group reservation containing <span className="font-bold text-white">{groupBookings.length} beds</span>:
+                  </div>
+                  <div className="flex flex-wrap gap-1.5 pt-1">
+                    {groupBookings.map((gb: any) => (
+                      <Badge
+                        key={gb.id}
+                        className={cn(
+                          "text-[10px] font-semibold border transition-colors",
+                          gb.id === selectedBooking.id
+                            ? "bg-violet-600 text-white border-violet-500 font-bold"
+                            : "bg-muted/40 text-slate-300 border-white/5"
+                        )}
+                      >
+                        Bed {gb.beds?.bed_number} ({gb.status === "booked" ? "Booked" : gb.status === "checked_in" ? "Checked In" : gb.status})
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* ACTION BUTTONS BASED ON ACTIVE BOOKING STATUS */}
               <div className="flex flex-col gap-2 pt-2">
                 {selectedBooking.status === "booked" && (
@@ -899,7 +1068,16 @@ export default function DormitoryCalendarPage() {
                     className="w-full rounded-xl font-bold bg-blue-600 hover:bg-blue-700 text-white h-11"
                     onClick={() => handleCheckinGuest(selectedBooking)}
                   >
-                    <LogIn className="size-4 mr-2" /> Check-In Guest Now
+                    <LogIn className="size-4 mr-2" /> Check-In Bed Now
+                  </Button>
+                )}
+
+                {groupBookings.length > 1 && groupBookings.some((gb: any) => gb.status === "booked") && (
+                  <Button
+                    className="w-full rounded-xl font-bold bg-violet-600 hover:bg-violet-700 text-white h-11"
+                    onClick={() => handleCheckinGroup(selectedBooking)}
+                  >
+                    <LogIn className="size-4 mr-2" /> Check-In Entire Group ({groupBookings.filter((gb: any) => gb.status === "booked").length} Beds)
                   </Button>
                 )}
 
@@ -912,6 +1090,15 @@ export default function DormitoryCalendarPage() {
                   </Button>
                 )}
 
+                {groupBookings.length > 1 && groupBookings.some((gb: any) => gb.status === "checked_in") && (
+                  <Button
+                    className="w-full rounded-xl font-bold bg-indigo-600 hover:bg-indigo-700 text-white h-11"
+                    onClick={() => handleCheckoutGroup(selectedBooking)}
+                  >
+                    <LogOut className="size-4 mr-2" /> Check-Out Entire Group ({groupBookings.filter((gb: any) => gb.status === "checked_in").length} Beds)
+                  </Button>
+                )}
+
                 {/* Cancel Booking option for booked reservations */}
                 {selectedBooking.status === "booked" && (
                   <Button
@@ -919,7 +1106,17 @@ export default function DormitoryCalendarPage() {
                     className="w-full rounded-xl font-bold text-rose-500 hover:bg-rose-500/10 hover:text-rose-400 h-10 border border-rose-500/20"
                     onClick={() => handleCancelBooking(selectedBooking)}
                   >
-                    <Trash2 className="size-4 mr-2" /> Cancel Reservation
+                    <Trash2 className="size-4 mr-2" /> Cancel Bed Reservation
+                  </Button>
+                )}
+
+                {groupBookings.length > 1 && groupBookings.some((gb: any) => gb.status === "booked") && (
+                  <Button
+                    variant="ghost"
+                    className="w-full rounded-xl font-bold text-rose-500 hover:bg-rose-500/10 hover:text-rose-400 h-10 border border-rose-500/20"
+                    onClick={() => handleCancelGroupBooking(selectedBooking)}
+                  >
+                    <Trash2 className="size-4 mr-2" /> Cancel Entire Group Booking
                   </Button>
                 )}
               </div>

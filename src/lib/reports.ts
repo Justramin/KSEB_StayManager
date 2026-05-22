@@ -92,12 +92,13 @@ export async function generateDormReport() {
     b.beds?.bed_number || "N/A",
     format(new Date(b.check_in_date), "MMM d, yyyy"),
     b.check_out_date ? format(new Date(b.check_out_date), "MMM d, yyyy") : "-",
-    b.status
+    b.status,
+    b.booking_reference ? b.booking_reference.substring(0, 8) : "-"
   ])
 
   autoTable(doc, {
     startY: 40,
-    head: [["Customer", "Dormitory", "Bed", "Check-in", "Check-out", "Status"]],
+    head: [["Customer", "Dormitory", "Bed", "Check-in", "Check-out", "Status", "Booking Ref"]],
     body: tableData,
     theme: 'striped',
     headStyles: { fillColor: [139, 92, 246] } // Violet-500/Indigo for dorm
